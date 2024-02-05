@@ -1,0 +1,11 @@
+services:
+  web1:
+    build: .
+    hostname: "web1"
+    ports:
+      - "8080:80"
+  web2:
+    build: .
+    hostname: "web2"
+    ports:
+      - "8081:80"
