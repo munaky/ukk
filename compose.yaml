@@ -9,3 +9,7 @@ services:
     hostname: "web2"
     ports:
       - "8081:80"
+  speedtest:
+    build: speedtest
+    ports:
+      - "9000:80"

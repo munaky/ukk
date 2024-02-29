@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local Speedtest</title>
+    <link rel="stylesheet" href="css/bootstrap.min.css">
+    <style>
+        .container {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .w-min-content {
+            width: min-content;
+        }
+
+        .progress {
+            min-width: 200px;
+            max-width: 300px;
+            position: relative;
+            visibility: hidden;
+        }
+
+        #eta {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            font-weight: bold;
+            color: #787878;
+        }
+
+        .text-down {
+            color: #2cd0f7;
+        }
+
+        .text-up {
+            color: #f100b5;
+        }
+
+        .progress-down {
+            background-color: #2cd0f7;
+        }
+
+        .progress-up {
+            background-color: #f100b5;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-auto">
+                <div class="d-flex flex-column mb-5 w-min-content">
+                    <div class="d-flex w-100 justify-content-center">
+                        <select class="form-select w-auto me-2 d-none" id="file">
+                            <option value="1mb.bin">1MB</option>
+                            <option value="3mb.bin">3MB</option>
+                            <option value="5mb.bin" selected>5MB</option>
+                            <option value="10mb.bin">10MB</option>
+                            <option value="50mb.bin">50MB</option>
+                        </select>
+                        <button type="button" id="start" class="btn btn-primary w-75"><strong>Start</strong></button>
+                    </div>
+                    <div class="progress mt-2">
+                        <p id="eta">0 sec</p>
+                        <div class="progress-bar progress-down" role="progressbar" style="width: 75%" aria-valuenow="25"
+                            aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row align-items-center justify-content-center text-center">
+            <div class="col-12 col-md-3 mb-3">
+                <h4 id="speed-down">0 Mbps</h4>
+                <h1 class="text-down">Download</h1>
+            </div>
+            <div class="col-12 col-md-3 mb-3">
+                <h4 id="speed-up">0 Mbps</h4>
+                <h1 class="text-up">Upload</h1>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // global vars
+        let req;
+        let avg = {};
+        let start = 0;
+        let decimals = 0;
+        let binaryData;
+
+        // control precision
+        function onKeyDown(ev) {
+            switch (ev.code) {
+                case 'ArrowUp':
+                case 'ArrowRight':
+                    decimals++;
+                    decimals = decimals > 3 ? 3 : decimals;
+                    break;
+
+                case 'ArrowDown':
+                case 'ArrowLeft':
+                    decimals--;
+                    decimals = decimals < 0 ? 0 : decimals;
+                    break;
+            }
+        }
+
+        document.addEventListener('keydown', onKeyDown);
+
+        // store <button> tags in array
+        //const btns = Array.from(document.querySelectorAll('button'));
+
+        // add click handler to buttons
+        document.getElementById('start').addEventListener('click', testDownload);
+        //click button
+        document.getElementById('start').click();
+        //btns.forEach(btn => {
+        //    btn.addEventListener('click', testDownload);
+        //});
+
+
+        /**
+         * Round number to defined decimals
+         *
+         * @param   {number}  num   Number to round
+         * @param   {number}  deci  Number of decimals to round to
+         * @return  {string}        Rounded number with trailing zeros
+         */
+
+        function dec(num, deci) {
+            const int = parseInt(num, 10);
+            const flo = parseFloat((num % 1).toFixed(deci));
+            const len = (String(flo).split('.')[1] || '').length;
+            const diff = deci - len;
+            let res = String(int + flo);
+
+            if (!flo && diff) {
+                res += '.';
+                for (let i = 0; i < diff; i++) {
+                    res += '0';
+                }
+            }
+
+            if (flo && diff > 0) {
+                for (let i = 0; i < diff; i++) {
+                    res += '0';
+                }
+            }
+
+            return res;
+        }
+
+
+        /**
+         * Test completed
+         *
+         * @return  {void}
+         */
+
+        function testDone(updown, evBtn, evReq) {
+            const diff = (Date.now() - start) / 1000;
+
+            if (updown === 'download') {
+                document.getElementById('speed-down').innerHTML = dec(avg.download, 1) + ' Mbps';
+                document.querySelector('.progress-bar').classList.remove('progress-down');
+                document.querySelector('.progress-bar').classList.add('progress-up');
+                binaryData = req.response;
+                testUpload(evBtn);
+            }
+            else {
+                binaryData = null;
+                resultString =
+                    dec(avg.download, 1)
+                    + ' / ' + dec(avg.upload, 1)
+                    + ' Mb'
+                    ;
+
+                document.getElementById('speed-down').innerHTML = dec(avg.download, 1) + ' Mbps';
+                document.getElementById('speed-up').innerHTML = dec(avg.upload, 1) + ' Mbps';
+                document.querySelector('.progress').style.visibility = 'hidden';
+                //document.querySelector('#result').className = 'resultDone';
+                //document.querySelector('#result').innerHTML = resultString;
+                document.querySelector('#eta').innerHTML = dec(diff, 2) + ' sec';
+                document.getElementById('start').disabled = false;
+
+                req = null;
+            }
+        }
+
+
+        /**
+         * Test progress handler
+         *
+         * @param   {Event}  ev  XMLHttpRequest.onprogress event
+         * @return  {void}
+         */
+
+        function testRunning(updown, ev) {
+            const now = Date.now();
+
+            let percent = 0.0;
+            let Bps = 0;
+            avg[updown] = 0;
+            let eta = 0;
+            let total = ev.total;
+            let diff = 0;
+
+            if (updown === 'upload') {
+                total = binaryData.size;
+            }
+
+            if (ev.lengthComputable && total) {
+                diff = (now - start) / 1000;
+                Bps = ev.loaded / diff;
+                mbit = Bps / 1024 / 1024 * 8;
+                avg[updown] = mbit;
+                percent = ev.loaded / total * 100.0;
+                eta = (total - ev.loaded) / Bps;
+            }
+
+            //if (updown === 'upload') {
+            //    percent = 100 - percent;
+            //}
+
+            document.querySelector('.progress-bar').style.width = percent + '%';
+            document.getElementById(updown == 'download' ? 'speed-down' : 'speed-up').innerHTML = dec(avg[updown], decimals) + ' Mbps';
+            document.querySelector('#eta').innerHTML = dec(eta, decimals) + ' detik';
+        }
+
+
+        /**
+         * Start new test
+         * and abort any running test
+         *
+         * @param   {Event}  ev  Click event
+         * @return  {void}
+         */
+
+        function testDownload(btnEv) {
+            if (req) {
+                req.abort();
+            }
+
+            req = new XMLHttpRequest;
+            start = Date.now();
+
+            //btns.forEach(btn => {
+            //    btn.className = '';
+            //});
+
+            // Append a timestamp as a query parameter to avoid caching
+            const fileUrl = document.getElementById('file').value + '?nocache=' + start;
+
+            //btnEv.target.className = 'choice';
+            document.getElementById('start').disabled = true;
+            document.getElementById('speed-down').innerHTML = '0 Mbps';
+            document.getElementById('speed-up').innerHTML = '0 Mbps';
+            document.querySelector('.progress-bar').classList.remove('progress-up');
+            document.querySelector('.progress-bar').classList.add('progress-down');
+            document.querySelector('.progress-bar').style.width = '0%';
+            document.querySelector('.progress').style.visibility = 'visible';
+
+            req.onprogress = progEv => {
+                testRunning('download', progEv);
+            };
+
+            req.onreadystatechange = reqEv => {
+                if (req.readyState === 4) {
+                    testDone('download', btnEv, reqEv);
+                }
+            };
+
+            // load file avoiding the cache
+            req.open('GET', fileUrl, true);
+            req.responseType = 'blob';
+            req.send(null);
+        }
+
+        function testUpload(btnEv) {
+            if (req) {
+                req.abort();
+            }
+
+            req = new XMLHttpRequest;
+            start = Date.now();
+
+            if (req.upload) {
+                req.upload.onprogress = progEv => {
+                    testRunning('upload', progEv);
+                };
+
+                req.upload.onloadend = reqEv => {
+                    testDone('upload', btnEv, reqEv);
+                };
+            }
+            else {
+                req.onprogress = progEv => {
+                    testRunning('upload', progEv);
+                };
+
+                req.onreadystatechange = onreadystatechange = reqEv => {
+                    if (req.readyState === 4) {
+                        testDone('upload', btnEv, reqEv);
+                    }
+                };
+            }
+
+            req.open('POST', '?nocache=' + start, true);
+            req.send(binaryData);
+        }
+    </script>
+</body>
+
+</html>
